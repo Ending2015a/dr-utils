@@ -1,3 +1,3 @@
 #!/bin/bash
 
-python3 paint.py --npy npy/2020-AmericasGeneratedInclStart.npy --width=1920
+python3 paint.py --npy npy/Spain_track.npy --width=1920

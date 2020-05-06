@@ -21,8 +21,11 @@ try:
 except:
     raise
 
-ACTIONS = [0.00356548, 0.12381341, -0.15538202, -0.05105542, 0.06705348, -0.34906585, 0.03286018]   # available steering angle of front wheel in radians
+def DEG2RAD(x):
+    return x/180.0*3.14159265358979
 
+ACTIONS = [0.00356548, 0.12381341, -0.15538202, -0.05105542, 0.06705348, -0.34906585, 0.03286018]   # available steering angle of front wheel in radians
+#ACTIONS = [DEG2RAD(-18), DEG2RAD(-9), DEG2RAD(0), DEG2RAD(9), DEG2RAD(18)]
 
 TRACK_LINES = [
     [[-6.951657, 2.045311], [-6.755911, 2.887871]],

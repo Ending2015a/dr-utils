@@ -14,6 +14,10 @@ from tkinter import *
 from tkinter.colorchooser import askcolor
 import dill
 
+from spline import calc_spline_course
+from spline import Spline2D
+
+import simulator as sim
 
 UNSELECTED_COLOR = '#f00'
 SELECTED_COLOR = '#00f'
@@ -22,7 +26,34 @@ SELECTED_COLOR = '#00f'
 def sort_line(lines):
     lines = copy.deepcopy(lines)
     
-
+    points = set()
+    
+    for line in lines:
+        points.add((line[0], line[1]))
+        points.add((line[2], line[3]))
+        
+    start_point = list(points)[0]
+    
+    points.remove(start_point)
+    
+    sorted_lines = []
+    
+    cur_point = start_point
+    
+    while len(points) > 0:
+        for line in lines:
+            if (line[0], line[1]) == cur_point and (line[2], line[3]) in points:
+                sorted_lines.append([cur_point[0], cur_point[1], line[2], line[3]])
+                cur_point = (line[2], line[3])
+                points.remove(cur_point)
+                break
+            elif (line[2], line[3]) == cur_point and (line[0], line[1]) in points:
+                sorted_lines.append([cur_point[0], cur_point[1], line[0], line[1]])
+                cur_point = (line[0], line[1])
+                points.remove(cur_point)
+                break
+            
+    return sorted_lines
     
 
 
@@ -425,8 +456,6 @@ class PointHolder():
 
         return self
 
-
-
 class Paint(object):
 
     DEFAULT_PEN_SIZE = 5.0
@@ -441,7 +470,7 @@ class Paint(object):
     def __init__(self, args):
         self.root = Tk()
 
-        
+        # row 1
         self.save_button = Button(self.root, text='Save', command=self.save_button_press)
         self.save_button.grid(row=0, column=0)
 
@@ -451,37 +480,54 @@ class Paint(object):
         self.generate_button = Button(self.root, text='Generate', command=self.generate_button_press)
         self.generate_button.grid(row=0, column=2)
 
-        
-        self.gen_interp_button = Button(self.root, text='Gen Interp', command=self.gen_interp_button_press)
-        self.gen_interp_button.grid(row=0, column=3)
-
         self.filename_entry = Entry(self.root)
-        self.filename_entry.grid(row=0, column=4)
-
+        self.filename_entry.grid(row=0, column=3)
         
+        
+        # row 2
         self.interp_button = Button(self.root, text='Interpolate', command=self.interp_button_press)
-        self.interp_button.grid(row=0, column=5)
-
+        self.interp_button.grid(row=1, column=0)
+        
         self.interp_entry = Entry(self.root)
-        self.interp_entry.grid(row=0, column=6)
+        self.interp_entry.grid(row=1, column=1)
+        
+        self.is_inverted = BooleanVar()
+        self.is_inverted.set(False)
+        self.invert_checkbox = Checkbutton(self.root, text='Invert', var=self.is_inverted, onvalue=True, offvalue=False)
+        self.invert_checkbox.grid(row=1, column=2)
+        
+        self.gen_interp_button = Button(self.root, text='Save Interp', command=self.gen_interp_button_press)
+        self.gen_interp_button.grid(row=1, column=3)
 
 
-
+        # row 3
         self.add_button = Button(self.root, text='Add', command=self.add_button_press)
-        self.add_button.grid(row=1, column=0)
+        self.add_button.grid(row=2, column=0)
 
         self.move_button = Button(self.root, text='Move', command=self.move_button_press)
-        self.move_button.grid(row=1, column=1)
+        self.move_button.grid(row=2, column=1)
 
         self.delete_button = Button(self.root, text='Delete', command=self.delete_button_press)
-        self.delete_button.grid(row=1, column=2)
+        self.delete_button.grid(row=2, column=2)
 
         self.connect_button = Button(self.root, text='Connect', command=self.connect_button_press)
-        self.connect_button.grid(row=1, column=3)
+        self.connect_button.grid(row=2, column=3)
 
         self.reset_button = Button(self.root, text='Reset', command=self.reset)
-        self.reset_button.grid(row=1, column=4)
+        self.reset_button.grid(row=2, column=4)
 
+        # row 4
+        self.move_car_button = Button(self.root, text='Move Car', command=self.move_car_button_press)
+        self.move_car_button.grid(row=3, column=0)
+
+        self.car_yaw_scale = Scale(self.root, from_=-180, to=180, orient=HORIZONTAL, command=self.car_yaw_scale_update)
+        self.car_yaw_scale.grid(row=3, column=1)
+
+        self.simulate_button = Button(self.root, text='Simulate', command=self.simulate_button_press)
+        self.simulate_button.grid(row=3, column=2)
+
+        self.stop_button = Button(self.root, text='Stop', command=self.stop_button_press)
+        self.stop_button.grid(row=3, column=3)
 
 
         self.mode = 'Add'
@@ -517,8 +563,13 @@ class Paint(object):
             self.width = args.width or 1280
             self.height = self.width/16*9
 
+        self.interp_oval = None
+        self.interp_info = None
+        self.car = None
+        self.yaw = 0
+
         self.c = Canvas(self.root, bg='white', width=self.width, height=self.height)
-        self.c.grid(row=2, columnspan=5)
+        self.c.grid(row=4, columnspan=5)
 
         self.reset()
 
@@ -577,10 +628,132 @@ class Paint(object):
 
 
     def gen_interp_button_press(self):
-        pass
+    
+        filename = self.filename_entry.get()
+        
+        assert self.interp_info is not None
+        
+        with open(filename, 'w') as f:
+        
+            f.write('cx = {!r}\n'.format(self.interp_info[0]))
+            f.write('cy = {!r}\n'.format(self.interp_info[1]))
+            f.write('cyaw = {!r}\n'.format(self.interp_info[2]))
+            f.write('ck = {!r}\n'.format(self.interp_info[3]))
+            f.write('s = {!r}\n'.format(self.interp_info[4]))
+        
+            #json.dump({'cx': self.interp_info[0], 
+            #           'cy': self.interp_info[1], 
+            #           'cyaw': self.interp_info[2],
+            #           'ck': self.interp_info[3],
+            #           's': self.interp_info[4]}, f, indent=2)
+             
+        print('File saved: {}'.format(filename))
 
     def interp_button_press(self):
-        pass
+    
+        if self.interp_oval is not None:
+            # TODO: delete points
+            for p in self.interp_oval:
+                self.c.delete(p)
+            self.interp_info = None
+            
+        
+        lines = []
+        for line in self.point_holder.connections.values():
+            c = self.c.coords(line)
+
+            a = self.pixel_to_point_transform(np.array([c[0], c[1]], dtype=np.float32))
+            b = self.pixel_to_point_transform(np.array([c[2], c[3]], dtype=np.float32))
+
+            lines.append([a[0], a[1], b[0], b[1]])
+        
+        lines = sort_line(lines)
+        
+        xs = []
+        ys = []
+        
+        for line in lines:
+            xs.append(line[0])
+            ys.append(line[1])
+            
+        xs.append(xs[0])
+        ys.append(ys[0])
+        
+        if self.is_inverted.get():
+            xs = xs[::-1]
+            ys = ys[::-1]
+            
+        ds = self.interp_entry.get()
+        
+        try:
+            ds = float(ds)
+        except Exception as e:
+            print('Exception! default ds=0.1')
+            ds = 0.1
+            
+        cx, cy, cyaw, ck, s = calc_spline_course(xs, ys, ds=ds)
+        
+        self.interp_oval = []
+        self.interp_info = None
+        
+        def palette(t):
+            a = np.array([0.5, 0.5, 0.5])
+            b = np.array([0.5, 0.5, 0.5])
+            c = np.array([1.0, 1.0, 1.0])
+            d = np.array([0.0, 0.33, 0.67])
+            cr = a + b * np.cos(6.28318*(c*t+d))
+            
+            cr = (np.clip(cr, 0.0, 1.0) * 255).astype(np.int32)
+            
+            return '#{:02x}{:02x}{:02x}'.format(*cr)
+        
+        for idx, (x, y) in enumerate(zip(cx, cy)):
+            self.interp_oval.append(
+                self.draw_point(self.point_to_pixel_transform(np.array([x, y])), color=palette(float(idx)/float(len(cx))), r=3)
+                )
+                
+            self.interp_info = (cx, cy, cyaw, ck, s)
+        
+
+    def move_car_button_press(self):
+
+        self.mode = 'MoveCar'
+        self.activate_button(self.move_car_button)
+
+    def car_yaw_scale_update(self, value=None):
+        
+        self.yaw = self.car_yaw_scale.get()
+        
+
+
+    def simulate_button_press(self):
+        self.mode = 'Simulate'
+        self.activate_button(self.simulate_button)
+        
+        assert self.interp_info is not None
+        
+        x1, y1, x2, y2 = self.c.coords(self.car)
+        p = self.pixel_to_point_transform(np.array([(x1+x2)/2, (y1+y2)/2]))
+        
+        x = p[0]
+        y = p[1]
+        yaw = self.yaw
+        
+        
+        sim.simulate(x, y, np.radians(yaw), start_idx=0, cx=self.interp_info[0],
+                                                         cy=self.interp_info[1],
+                                                         cyaw=self.interp_info[2],
+                                                         ck=self.interp_info[3],
+                                                         s=self.interp_info[4],
+                                                         center_course=self.center,
+                                                         inner_course=self.inner,
+                                                         outer_course=self.outer)
+        
+
+    def stop_button_press(self):
+        self.mode = 'Stop'
+        self.activate_button(self.simulate_button)
+
 
     def activate_button(self, button):
         self.active_button.config(relief=RAISED)
@@ -655,6 +828,10 @@ class Paint(object):
                 self.point_holder.connect(p1, p2)
 
                 self.select_point(oval)
+
+        if self.mode == 'MoveCar':
+            x1, y1, x2, y2 = self.c.coords(self.car)
+            self.c.move(self.car, event.x-(x1+x2)/2, event.y-(y1+y2)/2)
 
     def MRB_down(self, event):
         self.unselect_point()
@@ -735,7 +912,7 @@ class Paint(object):
             self.draw_waypoints()
  
         self.point_holder = PointHolder(self.c)
-
+        self.car = self.draw_point(self.point_to_pixel_transform(np.array([0.0, 0.0])), color='#ff00ff', r=8)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Deepracer SDF painter')
